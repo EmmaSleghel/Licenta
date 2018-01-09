@@ -1,1 +1,2 @@
 http://www.nltk.org/book/ch02.html
+https://streamhacker.com/2010/05/24/text-classification-sentiment-analysis-stopwords-collocations/
