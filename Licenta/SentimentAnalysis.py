@@ -1,51 +1,42 @@
-def word_feats(words):
-    return dict([(word, True) for word in words])
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+from scipy.sparse import hstack
+class_names = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 
+train = pd.read_csv('train.csv').fillna(' ')
+test = pd.read_csv('test.csv').fillna(' ')
 
-# training and testing a Naive Bayes Classifier on the movie review corpus
-import nltk.classify.util
-from nltk.classify import NaiveBayesClassifier
-from nltk.corpus import movie_reviews
-import collections
-import nltk.metrics
-from nltk.metrics import precision, recall, f_measure
+train_text = train['comment_text']
+test_text = test['comment_text']
+all_text = pd.concat([train_text, test_text])
+word_vectorizer = TfidfVectorizer(
+    sublinear_tf=True,
+    strip_accents='unicode',
+    analyzer='word',
+    token_pattern=r'\w{1,}',
+    stop_words='english',#term that is ignored because it occurs too much/it is not relevant
+    ngram_range=(1, 1),
+    max_features=10000)
+word_vectorizer.fit(all_text)# learn vocabulary and idf
+train_word_features = word_vectorizer.transform(train_text)##transform text into term matrix
+test_word_features = word_vectorizer.transform(test_text)
 
+scores = []
+submission = pd.DataFrame.from_dict({'id': test['id']})
+for class_name in class_names:
+    train_target = train[class_name]
+    classifier = LogisticRegression(solver='sag')
 
-def word_feats(words):
-    return dict([(word, True) for word in words])
+    cv_score = np.mean(cross_val_score(classifier, train_word_features, train_target, cv=3, scoring='roc_auc'))
+    scores.append(cv_score)
+    print('CV score for class {} is {}'.format(class_name, cv_score))
 
+    classifier.fit(train_word_features, train_target)
+    submission[class_name] = classifier.predict_proba(test_word_features)[:, 1]
 
-negids = movie_reviews.fileids('neg')
-posids = movie_reviews.fileids('pos')
+print('Total CV score is {}'.format(np.mean(scores)))
 
-negfeats = [(word_feats(movie_reviews.words(fileids=[f])), 'neg') for f in negids]
-posfeats = [(word_feats(movie_reviews.words(fileids=[f])), 'pos') for f in posids]
-
-negcutoff = len(negfeats) * 3 // 4
-poscutoff = len(posfeats) * 3 // 4
-
-trainfeats = negfeats[:negcutoff] + posfeats[:poscutoff]
-testfeats = negfeats[negcutoff:] + posfeats[poscutoff:]
-print('train on %d instances, test on %d instances' % (len(trainfeats), len(testfeats)))
-
-classifier = NaiveBayesClassifier.train(trainfeats)
-
-########part1-example1
-print('accuracy:', nltk.classify.util.accuracy(classifier, testfeats))
-classifier.show_most_informative_features()
-#####part2-example2
-
-refsets = collections.defaultdict(set)
-testsets = collections.defaultdict(set)
-
-for i, (feats, label) in enumerate(testfeats):
-    refsets[label].add(i)
-    observed = classifier.classify(feats)
-    testsets[observed].add(i)
-
-print('pos precision:', precision(refsets['pos'], testsets['pos']))
-print('pos recall:', recall(refsets['pos'], testsets['pos']))
-print('pos F-measure:', f_measure(refsets['pos'], testsets['pos']))
-print('neg precision:', precision(refsets['neg'], testsets['neg']))
-print('neg recall:', recall(refsets['neg'], testsets['neg']))
-print('neg F-measure:', f_measure(refsets['neg'], testsets['neg']))
+submission.to_csv('submission.csv', index=False)
